@@ -8,7 +8,7 @@ const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// 디스코드 봇 클라이언트 설정 (채팅 읽기 인텐트 추가)
+// 디스코드 봇 클라이언트 설정 (GuildMembers 인텐트 필수!)
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -45,18 +45,36 @@ client.once('ready', async () => {
 });
 
 // ==========================================
+// 2-0. 신규 유저 입장 시 '미인증' 역할 자동 부여
+// ==========================================
+client.on('guildMemberAdd', async member => {
+    try {
+        if (member.guild.id !== process.env.GUILD_ID) return;
+
+        const unverifiedRoleId = process.env.UNVERIFIED_ROLE_ID; 
+        if (unverifiedRoleId) {
+            const role = member.guild.roles.cache.get(unverifiedRoleId);
+            if (role) {
+                await member.roles.add(role);
+                console.log(`📥 신규 유저 입장: ${member.user.tag}에게 '미인증' 역할 부여 완료`);
+            }
+        }
+    } catch (error) {
+        console.error('신규 유저 역할 부여 중 오류 발생:', error);
+    }
+});
+
+// ==========================================
 // 2-1. !인증메시지 명령어 처리 이벤트
 // ==========================================
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
     
     if (message.content === '!인증메시지') {
-        // 관리자 권한 체크 (선택사항)
         if (!message.member.permissions.has('Administrator')) {
             return message.reply('이 명령어는 관리자만 사용할 수 있습니다.');
         }
 
-        // 인증 링크 (identify와 guilds 스코프를 포함하여 서버 확인 권한 요청)
         const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
 
         const row = new ActionRowBuilder().addComponents(
@@ -71,7 +89,6 @@ client.on('messageCreate', async message => {
             components: [row]
         });
         
-        // 사용자가 보낸 명령어 원본 삭제
         await message.delete().catch(() => {});
     }
 });
@@ -88,7 +105,6 @@ app.get('/auth/callback', async (req, res) => {
     if (!code) return res.status(400).send('인증 코드가 없습니다.');
 
     try {
-        // 1) 디스코드에서 Access Token 받아오기
         const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', new URLSearchParams({
             client_id: process.env.CLIENT_ID,
             client_secret: process.env.CLIENT_SECRET,
@@ -101,31 +117,40 @@ app.get('/auth/callback', async (req, res) => {
 
         const accessToken = tokenResponse.data.access_token;
 
-        // 2) 유저의 디스코드 고유 ID 및 정보 받아오기
         const userResponse = await axios.get('https://discord.com/api/users/@me', {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
         const userId = userResponse.data.id;
         const username = userResponse.data.username;
 
-        // 2-1) 유저가 속한 서버 목록 가져오기
+        // 유저가 속한 서버 목록을 가져와서 줄바꿈(-) 일자 형태로 보기 좋게 변환
         const userGuildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
         const userGuilds = userGuildsResponse.data;
-        const guildNames = userGuilds.map(g => g.name).join(', ') || '가입된 서버 없음';
+        const guildListText = userGuilds.length > 0 
+            ? userGuilds.map(g => `\n> - ${g.name}`).join('') 
+            : '\n> - 가입된 서버 없음';
 
-        // 3) 디스코드 서버(Guild) 및 멤버 객체 찾기
         const guild = client.guilds.cache.get(process.env.GUILD_ID);
         if (!guild) return res.status(500).send('설정된 서버를 찾을 수 없습니다.');
 
         const member = await guild.members.fetch(userId).catch(() => null);
         if (!member) return res.status(404).send('서버에 접속해 있지 않습니다. 디스코드 서버에 먼저 입장해주세요!');
 
-        // 4) 인증 완료 역할(Role) 부여하기
-        const role = guild.roles.cache.get(process.env.VERIFIED_ROLE_ID);
-        if (role) {
-            await member.roles.add(role);
+        // 4-1) 인증 완료 역할(패밀리 등) 부여하기
+        const verifiedRole = guild.roles.cache.get(process.env.VERIFIED_ROLE_ID);
+        if (verifiedRole) {
+            await member.roles.add(verifiedRole);
+        }
+
+        // 4-2) 미인증 역할 회수(제거)하기
+        const unverifiedRoleId = process.env.UNVERIFIED_ROLE_ID;
+        if (unverifiedRoleId) {
+            const unverifiedRole = guild.roles.cache.get(unverifiedRoleId);
+            if (unverifiedRole && member.roles.cache.has(unverifiedRoleId)) {
+                await member.roles.remove(unverifiedRole);
+            }
         }
 
         // 5) MongoDB 데이터베이스에 인증 기록 저장
@@ -135,13 +160,12 @@ app.get('/auth/callback', async (req, res) => {
             { upsert: true, new: true }
         );
 
-        // 6) 로그 채널에 인증 성공 메시지 및 유저의 서버 목록 전송
+        // 6) 로그 채널에 인증 성공 메시지 및 일자형 서버 목록 전송
         const logChannel = guild.channels.cache.get(process.env.LOG_CHANNEL_ID);
         if (logChannel) {
-            logChannel.send(`✅ **인증 완료**: <@${userId}> (${username}) 님이 웹 인증을 완료했습니다.\n🌐 **참가 중인 서버**: ${guildNames}`);
+            logChannel.send(`✅ **인증 완료**: <@${userId}> (${username}) 님이 웹 인증을 완료했습니다.\n🌐 **참가 중인 서버 목록:**${guildListText}`);
         }
 
-        // 7) 유저에게 보여줄 성공 화면
         res.send(`
             <div style="text-align: center; margin-top: 50px; font-family: sans-serif;">
                 <h1 style="color: #5865F2;">인증이 완료되었습니다! 🎉</h1>
