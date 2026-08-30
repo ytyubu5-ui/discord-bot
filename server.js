@@ -91,14 +91,14 @@ client.on('messageCreate', async message => {
         await message.delete().catch(() => {});
     }
 
-    // 2) !급식 [학교이름] 명령어 (개선된 검색 로직)
+    // 2) !급식 [학교이름] 명령어
     if (message.content.startsWith('!급식 ')) {
         const schoolName = message.content.replace('!급식 ', '').trim();
         if (!schoolName) return message.reply('❌ 검색할 학교 이름을 입력해주세요. (예: `!급식 조남중학교`)');
 
         try {
-            // NEIS 오픈 API를 통해 학교 검색 (기본 공개 키 사용)
-            const schoolSearchUrl = `https://open.neis.go.kr/hub/schoolInfo?KEY=f1624479e0a049199a5e8f47c0c1b002&Type=json&pIndex=1&pSize=5&SCHUL_NM=${encodeURIComponent(schoolName)}`;
+            // 공식 테스트 키 'sample' 사용 (추후 본인 인증키로 변경 가능)
+            const schoolSearchUrl = `https://open.neis.go.kr/hub/schoolInfo?KEY=sample&Type=json&pIndex=1&pSize=5&SCHUL_NM=${encodeURIComponent(schoolName)}`;
             const schoolRes = await axios.get(schoolSearchUrl);
             const schoolData = schoolRes.data;
 
@@ -127,7 +127,7 @@ client.on('messageCreate', async message => {
             const tomorrowStr = formatDate(tomorrow);
 
             // 급식 식단 정보 요청 API
-            const mealUrl = `https://open.neis.go.kr/hub/mealServiceDietInfo?KEY=f1624479e0a049199a5e8f47c0c1b002&Type=json&ATPT_OFCDC_SC_CODE=${sdCode}&SD_SCHUL_CODE=${sdid}&MLSV_YMD_FROM=${todayStr}&MLSV_YMD_TO=${tomorrowStr}`;
+            const mealUrl = `https://open.neis.go.kr/hub/mealServiceDietInfo?KEY=sample&Type=json&ATPT_OFCDC_SC_CODE=${sdCode}&SD_SCHUL_CODE=${sdid}&MLSV_YMD_FROM=${todayStr}&MLSV_YMD_TO=${tomorrowStr}`;
             const mealRes = await axios.get(mealUrl);
             const mealData = mealRes.data;
 
