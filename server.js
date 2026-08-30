@@ -91,19 +91,19 @@ client.on('messageCreate', async message => {
         await message.delete().catch(() => {});
     }
 
-    // 2) !급식 [학교이름] 명령어
+    // 2) !급식 [학교이름] 명령어 (개선된 검색 로직)
     if (message.content.startsWith('!급식 ')) {
         const schoolName = message.content.replace('!급식 ', '').trim();
-        if (!schoolName) return message.reply('❌ 검색할 학교 이름을 입력해주세요. (예: `!급식 시흥중학교`)');
+        if (!schoolName) return message.reply('❌ 검색할 학교 이름을 입력해주세요. (예: `!급식 조남중학교`)');
 
         try {
-            // 경기도교육청(기본) 및 전국 교육청 통합 학교 검색 API
+            // NEIS 오픈 API를 통해 학교 검색 (기본 공개 키 사용)
             const schoolSearchUrl = `https://open.neis.go.kr/hub/schoolInfo?KEY=f1624479e0a049199a5e8f47c0c1b002&Type=json&pIndex=1&pSize=5&SCHUL_NM=${encodeURIComponent(schoolName)}`;
             const schoolRes = await axios.get(schoolSearchUrl);
             const schoolData = schoolRes.data;
 
             if (!schoolData.schoolInfo) {
-                return message.reply(`❌ '${schoolName}'에 해당하는 학교를 찾을 수 없습니다. 정확한 풀네임을 입력해주세요.`);
+                return message.reply(`❌ '${schoolName}'에 해당하는 학교를 찾을 수 없습니다. 정확한 학교명을 입력해주세요.`);
             }
 
             const school = schoolData.schoolInfo[1].row[0];
@@ -132,7 +132,7 @@ client.on('messageCreate', async message => {
             const mealData = mealRes.data;
 
             if (!mealData.mealServiceDietInfo) {
-                return message.reply(`🍽️ **[ ${realSchoolName} ]**\n해당 기간에 등록된 급식 정보가 없습니다.`);
+                return message.reply(`🍽️ **[ ${realSchoolName} ]**\n해당 기간에 등록된 급식 정보가 없습니다. (주말/공휴일 등)`);
             }
 
             const rows = mealData.mealServiceDietInfo[1].row;
@@ -140,7 +140,6 @@ client.on('messageCreate', async message => {
             let tomorrowMenu = '급식 정보 없음';
 
             rows.forEach(item => {
-                // 줄바꿈 태그(<br/>)를 디스코드 줄바꿈으로 변환
                 const menu = item.DDISH_NM.replace(/<br\/>/g, '\n> - ');
                 if (item.MLSV_YMD === todayStr) {
                     todayMenu = `> - ${menu}`;
