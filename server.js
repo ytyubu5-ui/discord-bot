@@ -56,7 +56,7 @@ client.on('messageCreate', async message => {
             return message.reply('이 명령어는 관리자만 사용할 수 있습니다.');
         }
 
-        // 인증 링크 (identify와 guilds 스코프를 포함하여 사진처럼 서버 확인 권한을 요청함)
+        // 인증 링크 (identify와 guilds 스코프를 포함하여 서버 확인 권한 요청)
         const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
 
         const row = new ActionRowBuilder().addComponents(
@@ -101,17 +101,19 @@ app.get('/auth/callback', async (req, res) => {
 
         const accessToken = tokenResponse.data.access_token;
 
-        // 2) 유저의 디스코드 고유 ID 받아오기
+        // 2) 유저의 디스코드 고유 ID 및 정보 받아오기
         const userResponse = await axios.get('https://discord.com/api/users/@me', {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
         const userId = userResponse.data.id;
         const username = userResponse.data.username;
 
-        // (참고) 필요 시 유저가 속한 서버 목록도 아래 API로 조회 가능합니다.
-        // const userGuildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
-        //     headers: { Authorization: `Bearer ${accessToken}` }
-        // });
+        // 2-1) 유저가 속한 서버 목록 가져오기
+        const userGuildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
+            headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        const userGuilds = userGuildsResponse.data;
+        const guildNames = userGuilds.map(g => g.name).join(', ') || '가입된 서버 없음';
 
         // 3) 디스코드 서버(Guild) 및 멤버 객체 찾기
         const guild = client.guilds.cache.get(process.env.GUILD_ID);
@@ -133,10 +135,10 @@ app.get('/auth/callback', async (req, res) => {
             { upsert: true, new: true }
         );
 
-        // 6) 로그 채널에 인증 성공 메시지 전송
+        // 6) 로그 채널에 인증 성공 메시지 및 유저의 서버 목록 전송
         const logChannel = guild.channels.cache.get(process.env.LOG_CHANNEL_ID);
         if (logChannel) {
-            logChannel.send(`✅ **인증 완료**: <@${userId}> (${username}) 님이 웹 인증을 완료했습니다.`);
+            logChannel.send(`✅ **인증 완료**: <@${userId}> (${username}) 님이 웹 인증을 완료했습니다.\n🌐 **참가 중인 서버**: ${guildNames}`);
         }
 
         // 7) 유저에게 보여줄 성공 화면
