@@ -2,17 +2,19 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const axios = require('axios');
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 // 웹 서버 설정 (Render 24시간 가동 및 인증 콜백용)
 const app = express();
 const port = process.env.PORT || 3000;
 
-// 디스코드 봇 클라이언트 설정
+// 디스코드 봇 클라이언트 설정 (채팅 읽기 인텐트 추가)
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
     ],
 });
 
@@ -23,7 +25,6 @@ mongoose.connect(process.env.MONGODB_URI)
     .then(() => console.log('✅ MongoDB 연결 성공!'))
     .catch(err => console.error('❌ MongoDB 연결 실패:', err));
 
-// 인증된 유저 정보를 저장할 간단한 DB 스키마
 const UserSchema = new mongoose.Schema({
     userId: String,
     verifiedAt: { type: Date, default: Date.now }
@@ -36,8 +37,6 @@ const User = mongoose.model('User', UserSchema);
 client.once('ready', async () => {
     console.log(`=================================`);
     console.log(`🤖 봇 로그인 완료: ${client.user.tag}`);
-    
-    // 📌 방금 추가하신 "등록된 서버 목록" 출력 기능!
     console.log(`📌 현재 봇이 참가 중인 서버 목록 (총 ${client.guilds.cache.size}개):`);
     client.guilds.cache.forEach(guild => {
         console.log(`- [ ${guild.name} ] | ID: ${guild.id} | 멤버: ${guild.memberCount}명`);
@@ -46,14 +45,44 @@ client.once('ready', async () => {
 });
 
 // ==========================================
+// 2-1. !인증메시지 명령어 처리 이벤트
+// ==========================================
+client.on('messageCreate', async message => {
+    if (message.author.bot) return;
+    
+    if (message.content === '!인증메시지') {
+        // 관리자 권한 체크 (선택사항)
+        if (!message.member.permissions.has('Administrator')) {
+            return message.reply('이 명령어는 관리자만 사용할 수 있습니다.');
+        }
+
+        // 인증 링크 (identify와 guilds 스코프를 포함하여 사진처럼 서버 확인 권한을 요청함)
+        const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setStyle(ButtonStyle.Link)
+                .setURL(authUrl)
+                .setLabel('웹으로 인증하기')
+        );
+
+        await message.channel.send({
+            content: '📌 **[ 킹인수 패밀리 인증 시스템 ]**\n아래 버튼을 눌러 웹 인증을 진행해 주세요!',
+            components: [row]
+        });
+        
+        // 사용자가 보낸 명령어 원본 삭제
+        await message.delete().catch(() => {});
+    }
+});
+
+// ==========================================
 // 3. 웹 서버 라우팅 (디스코드 인증 콜백 처리)
 // ==========================================
-// 기본 도메인 접속 시 상태 확인용 화면
 app.get('/', (req, res) => {
     res.send('봇이 24시간 정상적으로 가동 중입니다. 🚀');
 });
 
-// 유저가 인증을 마치고 돌아오는 주소 (/auth/callback)
 app.get('/auth/callback', async (req, res) => {
     const code = req.query.code;
     if (!code) return res.status(400).send('인증 코드가 없습니다.');
@@ -78,6 +107,11 @@ app.get('/auth/callback', async (req, res) => {
         });
         const userId = userResponse.data.id;
         const username = userResponse.data.username;
+
+        // (참고) 필요 시 유저가 속한 서버 목록도 아래 API로 조회 가능합니다.
+        // const userGuildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
+        //     headers: { Authorization: `Bearer ${accessToken}` }
+        // });
 
         // 3) 디스코드 서버(Guild) 및 멤버 객체 찾기
         const guild = client.guilds.cache.get(process.env.GUILD_ID);
