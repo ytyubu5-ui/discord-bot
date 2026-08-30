@@ -95,7 +95,7 @@ client.on('messageCreate', async message => {
     if (message.content === '!급식' || message.content.startsWith('!급식 ')) {
         try {
             const sdCode = 'J10';         // 경기도교육청 코드
-            const sdid = 'J100000547';    // 조남중학교 표준학교코드
+            const sdid = '7781144';       // 조남중학교 행정표준코드
             const realSchoolName = '조남중학교';
 
             const today = new Date();
@@ -112,6 +112,7 @@ client.on('messageCreate', async message => {
             const todayStr = formatDate(today);
             const tomorrowStr = formatDate(tomorrow);
 
+            // KEY=sample 또는 발급받은 실제 인증키 사용
             const mealUrl = `https://open.neis.go.kr/hub/mealServiceDietInfo?KEY=sample&Type=json&ATPT_OFCDC_SC_CODE=${sdCode}&SD_SCHUL_CODE=${sdid}&MLSV_YMD_FROM=${todayStr}&MLSV_YMD_TO=${tomorrowStr}`;
             const mealRes = await axios.get(mealUrl);
             const mealData = mealRes.data;
