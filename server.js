@@ -4,11 +4,9 @@ const mongoose = require('mongoose');
 const axios = require('axios');
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
-// 웹 서버 설정 (Render 24시간 가동 및 인증 콜백용)
 const app = express();
 const port = process.env.PORT || 3000;
 
-// 디스코드 봇 클라이언트 설정 (GuildMembers 인텐트 필수!)
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -65,11 +63,12 @@ client.on('guildMemberAdd', async member => {
 });
 
 // ==========================================
-// 2-1. !인증메시지 명령어 처리 이벤트
+// 2-1. 명령어 처리 이벤트 (!인증메시지 & !급식)
 // ==========================================
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
     
+    // 1) !인증메시지 명령어
     if (message.content === '!인증메시지') {
         if (!message.member.permissions.has('Administrator')) {
             return message.reply('이 명령어는 관리자만 사용할 수 있습니다.');
@@ -90,6 +89,72 @@ client.on('messageCreate', async message => {
         });
         
         await message.delete().catch(() => {});
+    }
+
+    // 2) !급식 [학교이름] 명령어
+    if (message.content.startsWith('!급식 ')) {
+        const schoolName = message.content.replace('!급식 ', '').trim();
+        if (!schoolName) return message.reply('❌ 검색할 학교 이름을 입력해주세요. (예: `!급식 시흥중학교`)');
+
+        try {
+            // 경기도교육청(기본) 및 전국 교육청 통합 학교 검색 API
+            const schoolSearchUrl = `https://open.neis.go.kr/hub/schoolInfo?KEY=f1624479e0a049199a5e8f47c0c1b002&Type=json&pIndex=1&pSize=5&SCHUL_NM=${encodeURIComponent(schoolName)}`;
+            const schoolRes = await axios.get(schoolSearchUrl);
+            const schoolData = schoolRes.data;
+
+            if (!schoolData.schoolInfo) {
+                return message.reply(`❌ '${schoolName}'에 해당하는 학교를 찾을 수 없습니다. 정확한 풀네임을 입력해주세요.`);
+            }
+
+            const school = schoolData.schoolInfo[1].row[0];
+            const sdCode = school.ATPT_OFCDC_SC_CODE; // 시도교육청코드
+            const sdid = school.SD_SCHUL_CODE;        // 표준학교코드
+            const realSchoolName = school.SCHUL_NM;
+
+            // 오늘 날짜 및 내일 날짜 계산 (YYYYMMDD 형식)
+            const today = new Date();
+            const tomorrow = new Date(today);
+            tomorrow.setDate(today.getDate() + 1);
+
+            const formatDate = (date) => {
+                const y = date.getFullYear();
+                const m = String(date.getMonth() + 1).padStart(2, '0');
+                const d = String(date.getDate()).padStart(2, '0');
+                return `${y}${m}${d}`;
+            };
+
+            const todayStr = formatDate(today);
+            const tomorrowStr = formatDate(tomorrow);
+
+            // 급식 식단 정보 요청 API
+            const mealUrl = `https://open.neis.go.kr/hub/mealServiceDietInfo?KEY=f1624479e0a049199a5e8f47c0c1b002&Type=json&ATPT_OFCDC_SC_CODE=${sdCode}&SD_SCHUL_CODE=${sdid}&MLSV_YMD_FROM=${todayStr}&MLSV_YMD_TO=${tomorrowStr}`;
+            const mealRes = await axios.get(mealUrl);
+            const mealData = mealRes.data;
+
+            if (!mealData.mealServiceDietInfo) {
+                return message.reply(`🍽️ **[ ${realSchoolName} ]**\n해당 기간에 등록된 급식 정보가 없습니다.`);
+            }
+
+            const rows = mealData.mealServiceDietInfo[1].row;
+            let todayMenu = '급식 정보 없음';
+            let tomorrowMenu = '급식 정보 없음';
+
+            rows.forEach(item => {
+                // 줄바꿈 태그(<br/>)를 디스코드 줄바꿈으로 변환
+                const menu = item.DDISH_NM.replace(/<br\/>/g, '\n> - ');
+                if (item.MLSV_YMD === todayStr) {
+                    todayMenu = `> - ${menu}`;
+                } else if (item.MLSV_YMD === tomorrowStr) {
+                    tomorrowMenu = `> - ${menu}`;
+                }
+            });
+
+            await message.channel.send(`🏫 **[ ${realSchoolName} 급식 안내 ]**\n\n📅 **[ 오늘 급식 ]**\n${todayMenu}\n\n📅 **[ 내일 급식 ]**\n${tomorrowMenu}`);
+
+        } catch (error) {
+            console.error('급식 정보 조회 중 오류 발생:', error);
+            message.reply('⚠️ 급식 정보를 불러오는 중에 오류가 발생했습니다.');
+        }
     }
 });
 
@@ -123,7 +188,6 @@ app.get('/auth/callback', async (req, res) => {
         const userId = userResponse.data.id;
         const username = userResponse.data.username;
 
-        // 유저가 속한 서버 목록을 가져와서 줄바꿈(-) 일자 형태로 보기 좋게 변환
         const userGuildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
@@ -138,13 +202,11 @@ app.get('/auth/callback', async (req, res) => {
         const member = await guild.members.fetch(userId).catch(() => null);
         if (!member) return res.status(404).send('서버에 접속해 있지 않습니다. 디스코드 서버에 먼저 입장해주세요!');
 
-        // 4-1) 인증 완료 역할(패밀리 등) 부여하기
         const verifiedRole = guild.roles.cache.get(process.env.VERIFIED_ROLE_ID);
         if (verifiedRole) {
             await member.roles.add(verifiedRole);
         }
 
-        // 4-2) 미인증 역할 회수(제거)하기
         const unverifiedRoleId = process.env.UNVERIFIED_ROLE_ID;
         if (unverifiedRoleId) {
             const unverifiedRole = guild.roles.cache.get(unverifiedRoleId);
@@ -153,14 +215,12 @@ app.get('/auth/callback', async (req, res) => {
             }
         }
 
-        // 5) MongoDB 데이터베이스에 인증 기록 저장
         await User.findOneAndUpdate(
             { userId: userId }, 
             { userId: userId, verifiedAt: new Date() }, 
             { upsert: true, new: true }
         );
 
-        // 6) 로그 채널에 인증 성공 메시지 및 일자형 서버 목록 전송
         const logChannel = guild.channels.cache.get(process.env.LOG_CHANNEL_ID);
         if (logChannel) {
             logChannel.send(`✅ **인증 완료**: <@${userId}> (${username}) 님이 웹 인증을 완료했습니다.\n🌐 **참가 중인 서버 목록:**${guildListText}`);
