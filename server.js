@@ -91,27 +91,13 @@ client.on('messageCreate', async message => {
         await message.delete().catch(() => {});
     }
 
-    // 2) !급식 [학교이름] 명령어
-    if (message.content.startsWith('!급식 ')) {
-        const schoolName = message.content.replace('!급식 ', '').trim();
-        if (!schoolName) return message.reply('❌ 검색할 학교 이름을 입력해주세요. (예: `!급식 조남중학교`)');
-
+    // 2) !급식 명령어 (조남중학교 고정 조회)
+    if (message.content === '!급식' || message.content.startsWith('!급식 ')) {
         try {
-            // 공식 테스트 키 'sample' 사용 (추후 본인 인증키로 변경 가능)
-            const schoolSearchUrl = `https://open.neis.go.kr/hub/schoolInfo?KEY=sample&Type=json&pIndex=1&pSize=5&SCHUL_NM=${encodeURIComponent(schoolName)}`;
-            const schoolRes = await axios.get(schoolSearchUrl);
-            const schoolData = schoolRes.data;
+            const sdCode = 'J10';         // 경기도교육청 코드
+            const sdid = 'J100000547';    // 조남중학교 표준학교코드
+            const realSchoolName = '조남중학교';
 
-            if (!schoolData.schoolInfo) {
-                return message.reply(`❌ '${schoolName}'에 해당하는 학교를 찾을 수 없습니다. 정확한 학교명을 입력해주세요.`);
-            }
-
-            const school = schoolData.schoolInfo[1].row[0];
-            const sdCode = school.ATPT_OFCDC_SC_CODE; // 시도교육청코드
-            const sdid = school.SD_SCHUL_CODE;        // 표준학교코드
-            const realSchoolName = school.SCHUL_NM;
-
-            // 오늘 날짜 및 내일 날짜 계산 (YYYYMMDD 형식)
             const today = new Date();
             const tomorrow = new Date(today);
             tomorrow.setDate(today.getDate() + 1);
@@ -126,7 +112,6 @@ client.on('messageCreate', async message => {
             const todayStr = formatDate(today);
             const tomorrowStr = formatDate(tomorrow);
 
-            // 급식 식단 정보 요청 API
             const mealUrl = `https://open.neis.go.kr/hub/mealServiceDietInfo?KEY=sample&Type=json&ATPT_OFCDC_SC_CODE=${sdCode}&SD_SCHUL_CODE=${sdid}&MLSV_YMD_FROM=${todayStr}&MLSV_YMD_TO=${tomorrowStr}`;
             const mealRes = await axios.get(mealUrl);
             const mealData = mealRes.data;
